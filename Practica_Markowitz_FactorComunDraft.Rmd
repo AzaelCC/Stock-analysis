@@ -1,0 +1,237 @@
+---
+title: "Práctica Markowitz y Factor común"
+author: 
+- "Azael Carrillo Cabrera"
+- "Profesor: Dr. Gustavo Cabrera González"
+output:
+  html_notebook: 
+    code_folding: hide
+    theme: yeti
+---
+```{r}
+library(ggplot2)
+library(ggthemes)
+library(scales)
+library(reshape2)
+library(dplyr)
+library(readxl)
+library(knitr)
+library(kableExtra)
+
+```
+`r options(scipen=999)`
+`r options(knitr.kable.NA = '')`
+
+###Extraemos los datos y los preparamos:
+```{r}
+dataEmis <- read_excel(path = "HM_data_emisoras.xlsx", 
+                               sheet = "data_emisoras", 
+                               col_types = c("date", 
+                                             "numeric", "numeric", "numeric", 
+                                             "numeric", "numeric", "numeric", 
+                                             "numeric", "numeric", "numeric", 
+                                             "numeric", "numeric", "numeric", 
+                                             "numeric", "numeric", "numeric", 
+                                             "numeric", "numeric", "numeric", 
+                                             "numeric", "numeric", "numeric", 
+                                             "numeric", "numeric", "numeric", 
+                                             "numeric", "numeric", "numeric"), 
+                               na = "na")
+##Borramos los registros que tienen NA en su fila
+dataEmis <- dataEmis[complete.cases(dataEmis),]
+
+kable(head(dataEmis, 50) ,escape = F) %>%
+  kable_styling("hover", full_width = F) %>%
+  column_spec(1, width = "2cm") %>%
+  scroll_box(width = "100%", height = "300px")
+
+```
+
+###1) Tomar tasas de crecimieno diario
+```{r}
+creci <- function(x){
+  100*(x-lag(x))/lag(x)
+}
+emisCre <- data.frame(apply(dataEmis[,-1], 2, creci))
+emisCre$date <- dataEmis$`Pricing date`
+emisCre <- emisCre[,c(28, 1:27)]
+emisCre <- emisCre[complete.cases(emisCre),]
+attributes(emisCre)$names <- attributes(dataEmis)$names
+##Alterna compacta: emisCre <- data.frame(apply(dataEmis[,-1], 2, function(x) 100*(x-lag(x))/lag(x)))
+kable(head(emisCre, 50) ,escape = F) %>%
+  kable_styling("hover", full_width = F) %>%
+  column_spec(1, width = "2cm") %>%
+  scroll_box(width = "100%", height = "300px")
+```
+
+###2) Calcular la matriz de variaza covarianza de las 27
+```{r}
+attributes(emisCre)$names <- c("date", paste("X",1:(length(attributes(emisCre)$names)-1),sep=""))
+cat("Se muestra cov-var matrix incompleta de ejemplo, pero en el código se ve que se utiliza la completa")
+cov(emisCre[,-(1:20)])
+attributes(emisCre)$names <- attributes(dataEmis)$names
+varcovT <- cov(emisCre[,-1])
+```
+
+###3) Elige 6 de ellas con la varianza menor
+```{r}
+varT <- diag(varcovT)
+min6 <- attributes(sort(varT)[1:6])$names
+min6
+varcov6 <- cov(emisCre[,min6])
+```
+
+###4) Aplica la minimización del riesgo y calcula el riesgo para todos los posibles pares sobre las 6 elegidas
+```{r}
+comb6by2 <- combn(names(emisCre[,min6]), 2, simplify = FALSE)
+i2 = matrix(c(rep(1, 2)))
+n = factorial(6)/(factorial(2)*factorial((6-2)))
+varcovs4 <- list()
+a4 <- list()
+risks4 <- c()
+for (n in 1:n) {
+  varcovs4[[n]] <- cov(emisCre[,unlist(comb6by2[n])])
+  lambda <- as.vector((t(i2)%*%(varcovs4[[n]]^-1)%*%i2)^-1)
+  a4[[n]] = lambda*(varcovs4[[n]]^-1)%*%i2
+  risks4[n] <- t(a4[[n]])%*%varcovs4[[n]]%*%a4[[n]]
+}
+
+##Par con mínimo riesgo
+minr4 <- which(risks4 == min(risks4))
+
+cat("El riesgo de la cartera optima para un par de las 6 acciones con menor riesgo es: ", min(risks4), sep = "")
+
+#tab4 <- data.frame(sort(setNames(unlist(a4[[minr4]], use.names = FALSE), attributes(a4[[minr4]])$dimnames[[1]])))
+#names(tab4) <- c("Porcentaje")
+#for (n in 1:length(a4)){
+#  a4[[n]] <- sort(setNames(unlist(a4[[n]], use.names = FALSE), attributes(a4[[n]])$dimnames[[1]]), #decreasing = FALSE)
+#}
+
+a4t <- data.frame(Accion = attributes(do.call(rbind,a4))$dimnames[[1]], Porcentaje = do.call(rbind,a4))
+a4t$riesgo <- rep(risks4, each = 2)
+a4t<-with(a4t, a4t[order(riesgo, Porcentaje),])
+a4t$grupo = rep(1:(length(a4t$Porcentaje)/2), each = 2)
+rownames(a4t) <- NULL
+a4t[seq(1, length(a4t$riesgo), 2),c("grupo", "riesgo")] <- NA
+
+kable(tab4, escape = F) %>%
+  kable_styling("hover", full_width = F) %>%
+  column_spec(1, width = "15cm")
+
+kable(a4t, escape = F) %>%
+  kable_styling(bootstrap_options = c("hover"), full_width = F) %>%
+  row_spec(seq(2, length(a4t$riesgo), 2), bold = F, color = "#4a6591")%>%
+  column_spec(1, width = "15cm", bold = T, border_right = T, color = "black") %>%
+  column_spec(2, bold = F,color = "black")%>%
+  column_spec(3:4, bold = T)%>%
+  scroll_box(height = "300px")
+  
+
+```
+
+###5) Aplica la minimización del riesgo y calcula el riesgo para todos los posibles tercias sobre las 6 elegidas
+```{r}
+comb6by3 <- combn(names(emisCre[,min6]), 3, simplify = FALSE)
+i3 = matrix(c(rep(1, 3)))
+n = factorial(6)/(factorial(3)*factorial((6-3)))
+varcovs5 <- list()
+a5 <- list()
+risks5 <- c()
+for (n in 1:n) {
+  varcovs5[[n]] <- cov(emisCre[,unlist(comb6by3[n])])
+  lambda <- as.vector((t(i3)%*%(varcovs5[[n]]^-1)%*%i3)^-1)
+  a5[[n]] = lambda*(varcovs5[[n]]^-1)%*%i3
+  risks5[n] <- t(a5[[n]])%*%varcovs5[[n]]%*%a5[[n]]
+}
+
+##Par con mínimo riesgo
+
+minr5 <- which(risks5 == min(risks5))
+
+cat("El riesgo de la cartera optima para un tercio de las 6 acciones con menor riesgo es: ", min(risks5), sep = "")
+tab5 <- data.frame(sort(setNames(unlist(a5[[minr5]], use.names = FALSE), attributes(a5[[minr5]])$dimnames[[1]])))
+names(tab5) <- c("Porcentaje")
+kable(tab5, escape = F) %>%
+  kable_styling("hover", full_width = F) %>%
+  column_spec(1, width = "15cm")
+
+```
+
+###6) Aplica la minimización del riesgo y calcula el riesgo para todos los posibles cuartetos sobre las 6 elegidas
+```{r}
+comb6by4 <- combn(names(emisCre[,min6]), 4, simplify = FALSE)
+i4 = matrix(c(rep(1, 4)))
+n = factorial(6)/(factorial(4)*factorial((6-4)))
+varcovs6 <- list()
+a6 <- list()
+risks6 <- c()
+for (n in 1:n) {
+  varcovs6[[n]] <- cov(emisCre[,unlist(comb6by4[n])])
+  lambda <- as.vector((t(i4)%*%(varcovs6[[n]]^-1)%*%i4)^-1)
+  a6[[n]] = lambda*(varcovs6[[n]]^-1)%*%i4
+  risks6[n] <- t(a6[[n]])%*%varcovs6[[n]]%*%a6[[n]]
+}
+
+aa <- lapply(a6, sort)
+attributes(a6[[1]])
+for(i in aa){
+  attributes(aa[[1]])$dimnames[[1]] <- attributes(aa[[1]])$dimnames[[1]]
+}
+##Par con mínimo riesgo
+
+minr6 <- which(risks6 == min(risks6))
+
+cat("El riesgo de la cartera optima para un cuarteto de las 6 acciones con menor riesgo es: ", min(risks6), sep = "")
+tab6 <- data.frame(sort(setNames(unlist(a6[[minr6]], use.names = FALSE), attributes(a6[[minr6]])$dimnames[[1]])))
+names(tab6) <- c("Porcentaje")
+kable(tab6, escape = F) %>%
+  kable_styling("hover", full_width = F) %>%
+  column_spec(1, width = "15cm")
+
+
+```
+
+###7) Aplica la minimización del riesgo y calcula el riesgo para todos las 6 elegidas
+```{r}
+i6 = matrix(c(rep(1, 6)))
+varcovs7 <- list()
+a7 <- list()
+risks7 <- c()
+
+varcovs7[[1]] <- cov(emisCre[,min6])
+lambda <- as.vector((t(i6)%*%(varcovs7[[1]]^-1)%*%i6)^-1)
+a7[[1]] = lambda*(varcovs7[[1]]^-1)%*%i6
+risks7[1] <- t(a7[[1]])%*%varcovs7[[1]]%*%a7[[1]]
+
+cat("El riesgo de la cartera optima para las 6 acciones con menor riesgo es: ", risks7, sep = "")
+tab7 <- data.frame(sort(setNames(unlist(a7[[1]], use.names = FALSE), attributes(a7[[1]])$dimnames[[1]])))
+names(tab7) <- c("Porcentaje")
+kable(tab7, escape = F) %>%
+  kable_styling("hover", full_width = F) %>%
+  column_spec(1, width = "15cm")
+```
+###8) Aplica la minimización del riesgo y calcula el riesgo para todos las 27 emisoras
+```{r}
+i27 = matrix(c(rep(1, 27)))
+varcovs8 <- list()
+a8 <- list()
+risks8 <- c()
+
+varcovs8[[1]] <- cov(emisCre[,-1])
+lambda <- as.vector((t(i27)%*%(varcovs8[[1]]^-1)%*%i27)^-1)
+a8[[1]] = lambda*(varcovs8[[1]]^-1)%*%i27
+risks8[1] <- t(a8[[1]])%*%varcovs8[[1]]%*%a8[[1]]
+
+cat("El riesgo de la cartera optima para las 27 acciones es: ", risks8, sep = "")
+tab8 <- data.frame(sort(setNames(unlist(a8[[1]], use.names = FALSE), attributes(a8[[1]])$dimnames[[1]])))
+names(tab8) <- c("Porcentaje")
+kable(tab8, escape = F) %>%
+  kable_styling("hover", full_width = F) %>%
+  column_spec(1, width = "15cm") %>%
+  scroll_box(height = "300px")
+```
+###9) Interpreta los resultados de 4 a 8 indicando cuáles son las emiosaras preferidas en cada inciso
+###10) Explica cuáles son las mejores carteras
+
+
+
